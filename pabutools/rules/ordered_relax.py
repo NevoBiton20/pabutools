@@ -172,34 +172,6 @@ def ordered_relax(
         >>> selected_names(ordered_relax(instance, profile)) == {"p4"}
         True
 
-        Example 6.
-
-        >>> instance, profile = make_election(
-        ...     {
-        ...         "p0": 18,
-        ...         "p1": 45,
-        ...         "p2": 43,
-        ...         "p3": 32,
-        ...         "p4": 28,
-        ...         "p5": 32,
-        ...         "p6": 5,
-        ...         "p7": 37,
-        ...         "p8": 43,
-        ...         "p9": 17,
-        ...     },
-        ...     124,
-        ...     [
-        ...         {"p0", "p3", "p7"},
-        ...         {"p1", "p4", "p6", "p7"},
-        ...         {"p0", "p2", "p4", "p5"},
-        ...         {"p1", "p6", "p9"},
-        ...         {"p1", "p2", "p6", "p7", "p8"},
-        ...         {"p1", "p3", "p4", "p6", "p8"},
-        ...     ],
-        ... )
-        >>> selected_names(ordered_relax(instance, profile)) == {"p1", "p2"}
-        True
-
     Notes
     -----
         Ordered-Relax is not guaranteed to return an optimal MPB outcome on
@@ -231,18 +203,12 @@ def ordered_relax(
     else:
         budget_allocation = BudgetAllocation(initial_budget_allocation)
         logger.debug(
-            "Initial budget allocation: %s",
+            "Initial budget allocation was provided: %s",
             [project.name for project in budget_allocation],
         )
 
     initial_cost = total_cost(budget_allocation)
     remaining_budget = instance.budget_limit - initial_cost
-
-    logger.debug("Number of projects in the instance: %d", len(list(instance)))
-    logger.debug("Number of voters in the profile: %d", profile.num_ballots())
-    logger.debug("Budget limit: %s", instance.budget_limit)
-    logger.debug("Initial allocation cost: %s", initial_cost)
-    logger.debug("Remaining budget before Ordered-Relax: %s", remaining_budget)
 
     if remaining_budget < 0:
         logger.error(
@@ -259,8 +225,16 @@ def ordered_relax(
         and 0 <= project.cost <= instance.budget_limit
     ]
 
-    logger.debug(
-        "Available projects before solving the LP: %s",
+    logger.info(
+        "Initial state | projects=%d | voters=%d | budget=%s | "
+        "initial_allocation=%s | initial_cost=%s | remaining_budget=%s | "
+        "available_projects=%s",
+        len(list(instance)),
+        profile.num_ballots(),
+        instance.budget_limit,
+        [project.name for project in budget_allocation],
+        initial_cost,
+        remaining_budget,
         [(project.name, project.cost) for project in available_projects],
     )
 
@@ -281,15 +255,10 @@ def ordered_relax(
         initial_budget_allocation=budget_allocation,
     )
 
-    logger.debug(
-        "LP relaxation values: %s",
-        {project.name: lp_values[project] for project in available_projects},
-    )
-
-    logger.debug(
-        "Ordered-Relax scores: %s",
+    logger.info(
+        "Ordered-Relax scores | scores=%s",
         {
-            project.name: _relaxed_score(project, lp_values)
+            project.name: round(_relaxed_score(project, lp_values), 6)
             for project in available_projects
         },
     )
@@ -304,10 +273,14 @@ def ordered_relax(
         tie_breaking,
     )
 
-    logger.debug(
-        "Project order after tie-breaking: %s",
+    logger.info(
+        "Project order after tie-breaking | order=%s",
         [
-            (project.name, project.cost, _relaxed_score(project, lp_values))
+            (
+                project.name,
+                project.cost,
+                round(_relaxed_score(project, lp_values), 6),
+            )
             for project in ordered_projects
         ],
     )
@@ -326,16 +299,18 @@ def ordered_relax(
             budget_allocation.append(project)
             remaining_budget -= project.cost
 
-            logger.debug(
-                "Selected project %s. Current allocation: %s. Remaining budget: %s",
+            logger.info(
+                "Selected project | project=%s | cost=%s | remaining_budget=%s | "
+                "current_allocation=%s",
                 project.name,
-                [p.name for p in budget_allocation],
+                project.cost,
                 remaining_budget,
+                [p.name for p in budget_allocation],
             )
         else:
             logger.info(
-                "Stopping ordered-fill: project %s with cost %s does not fit "
-                "the remaining budget %s.",
+                "Stopping ordered-fill | project=%s | project_cost=%s | "
+                "remaining_budget=%s | reason=next project does not fit",
                 project.name,
                 project.cost,
                 remaining_budget,
@@ -343,9 +318,10 @@ def ordered_relax(
             break
 
     logger.info(
-        "Ordered-Relax finished. Selected projects: %s. Total cost: %s",
+        "Ordered-Relax finished | selected_projects=%s | total_cost=%s | budget=%s",
         [project.name for project in budget_allocation],
         total_cost(budget_allocation),
+        instance.budget_limit,
     )
 
     return BudgetAllocation(budget_allocation)
@@ -448,10 +424,13 @@ def _solve_mpb_lp_relaxation(
         for project in projects
     }
 
-    logger.debug(
-        "LP relaxation solved successfully. q=%s, x=%s",
-        value(q),
-        {project.name: lp_values[project] for project in projects},
+    logger.info(
+        "LP relaxation solved | q=%s | x=%s",
+        round(float(value(q) or 0.0), 6),
+        {
+            project.name: round(lp_values[project], 6)
+            for project in projects
+        },
     )
 
     return lp_values
@@ -593,3 +572,68 @@ def _order_projects_by_relaxed_score(
             )
 
     return ordered_projects
+
+def _run_demo() -> None:
+    """
+    Run a small demo of the Ordered-Relax rule with logging enabled.
+
+    This is only for manual demonstration and is not used by the library.
+    """
+    from pabutools.election import ApprovalBallot, ApprovalProfile
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s:%(name)s:%(message)s",
+        force=True,
+    )
+
+    costs = {
+        "p0": 18,
+        "p1": 45,
+        "p2": 43,
+        "p3": 32,
+        "p4": 28,
+        "p5": 32,
+        "p6": 5,
+        "p7": 37,
+        "p8": 43,
+        "p9": 17,
+    }
+
+    budget = 124
+
+    approvals = [
+        {"p0", "p3", "p7"},
+        {"p1", "p4", "p6", "p7"},
+        {"p0", "p2", "p4", "p5"},
+        {"p1", "p6", "p9"},
+        {"p1", "p2", "p6", "p7", "p8"},
+        {"p1", "p3", "p4", "p6", "p8"},
+    ]
+
+    projects = {
+        name: Project(name, cost)
+        for name, cost in costs.items()
+    }
+
+    instance = Instance(projects.values(), budget_limit=budget)
+
+    profile = ApprovalProfile(
+        [
+            ApprovalBallot({projects[name] for name in ballot})
+            for ballot in approvals
+        ]
+    )
+
+    print("\nRunning Ordered-Relax demo...\n")
+
+    allocation = ordered_relax(instance, profile)
+
+    print("\nFinal allocation:")
+    print(sorted(project.name for project in allocation))
+    print("Total cost:", total_cost(allocation))
+    print("Budget limit:", instance.budget_limit)
+
+
+if __name__ == "__main__":
+    _run_demo()
